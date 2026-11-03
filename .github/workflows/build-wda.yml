@@ -1,0 +1,59 @@
+# Compila WebDriverAgent (Appium) in versione NON firmata, per sideload con l'Apple ID di chi lo usa.
+# Si avvia a mano: Actions → «Build WebDriverAgent IPA (unsigned)» → Run workflow.
+name: Build WebDriverAgent IPA (unsigned)
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag di appium/WebDriverAgent da compilare"
+        required: true
+        default: "v16.15.3"
+
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 40
+    steps:
+      - name: Sorgenti di WebDriverAgent (ufficiale, Appium)
+        uses: actions/checkout@v4
+        with:
+          repository: appium/WebDriverAgent
+          ref: ${{ inputs.tag }}
+          path: wda
+
+      - name: Versioni di Xcode e SDK
+        run: |
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+
+      - name: Compila WebDriverAgentRunner senza firma
+        working-directory: wda
+        run: |
+          xcodebuild build-for-testing \
+            -project WebDriverAgent.xcodeproj \
+            -scheme WebDriverAgentRunner \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath ../build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            ONLY_ACTIVE_ARCH=NO
+
+      - name: Impacchetta l'IPA
+        run: |
+          APP=$(find build -type d -name 'WebDriverAgentRunner-Runner.app' -path '*Release-iphoneos*' | head -1)
+          test -n "$APP" || { echo "WebDriverAgentRunner-Runner.app non trovata"; exit 1; }
+          echo "App: $APP"
+          mkdir -p out/Payload
+          cp -R "$APP" out/Payload/
+          find out/Payload -name '*.dSYM' -prune -exec rm -rf {} +
+          (cd out && zip -qry WebDriverAgentRunner.ipa Payload)
+          ls -lh out/WebDriverAgentRunner.ipa
+
+      - name: Pubblica l'IPA come artefatto
+        uses: actions/upload-artifact@v4
+        with:
+          name: WebDriverAgentRunner-unsigned-ipa
+          path: out/WebDriverAgentRunner.ipa
+          retention-days: 30
